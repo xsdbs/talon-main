@@ -1,0 +1,469 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="graphite" data-scheme="dark" data-accent="indigo" data-density="cozy" data-motion="full" data-corners="round" data-font="inter">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1, user-scalable=no">
+  <meta name="theme-color" content="#1e1f23" id="meta-theme-color">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Talon">
+  <meta name="description" content="Zero-knowledge end-to-end encrypted messenger.">
+  <link rel="manifest" href="manifest.json">
+  <title>Talon</title>
+
+  <!-- Fonts are self-hosted (vendored from npm by esbuild.config.js), never
+       from a CDN: the service worker skips cross-origin requests, so a hosted
+       <link> would break the offline shell and leak a request to a third
+       party on every load. Preloaded because @font-face inside style.css is
+       only discovered after the stylesheet parses. -->
+  <link rel="preload" as="font" type="font/woff2" crossorigin
+        href="fonts/inter-latin-wght-normal.woff2">
+  <link rel="preload" as="font" type="font/woff2" crossorigin
+        href="fonts/jetbrains-mono-latin-wght-normal.woff2">
+  <link rel="stylesheet" href="style.css">
+  <link rel="icon" type="image/png" sizes="192x192" href="icon-192.png">
+  <link rel="apple-touch-icon" href="icon-192.png">
+
+  <!-- Applies the saved theme before first paint (no flash of the wrong
+       scheme). External rather than inline so a strict CSP can forbid inline
+       script; it is precached by the service worker so it costs nothing. -->
+  <script src="theme-preload.js"></script>
+</head>
+<body>
+
+<!-- ==========================================================================
+     ICON SPRITE. Defined once, referenced with <use href="#i-name">.
+     Keeps generated markup in app.js short and the DOM light.
+     ======================================================================= -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <!-- An origami dart. Replaces three unexplained claw strokes.
+         Drawn as one closed outline plus the fold, rather than the usual
+         polygon-with-a-line, so the joins stay rounded and it holds up at
+         72px on the auth card as well as 16px in the rail. It is in the same
+         family as the send glyph in the composer, which is deliberate: at
+         logo sizes the fold and the proportions read differently, and the
+         send button is a small filled circle, so the two never look like the
+         same control. -->
+    <g id="i-talon" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M21.3 2.7 2.9 9.6a.55.55 0 0 0-.05 1l6.76 3.02 3.02 6.76a.55.55 0 0 0 1-.05Z"></path>
+      <path d="M21.3 2.7 9.61 13.62"></path>
+    </g>
+    <g id="i-chat" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M21 11.5a8.4 8.4 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.4 8.4 0 0 1-3.8-.9L3 21l1.9-5.7a8.4 8.4 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.4 8.4 0 0 1 3.8-.9h.5a8.5 8.5 0 0 1 8 8v.5z"></path>
+    </g>
+    <g id="i-user" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle>
+    </g>
+    <g id="i-settings" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <circle cx="12" cy="12" r="3"></circle>
+      <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9v0a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+    </g>
+    <g id="i-search" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <circle cx="11" cy="11" r="7"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+    </g>
+    <g id="i-plus" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line>
+    </g>
+    <g id="i-close" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line>
+    </g>
+    <g id="i-back" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <line x1="19" y1="12" x2="5" y2="12"></line><polyline points="12 19 5 12 12 5"></polyline>
+    </g>
+    <g id="i-chevron" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <polyline points="9 18 15 12 9 6"></polyline>
+    </g>
+    <g id="i-down" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <line x1="12" y1="5" x2="12" y2="19"></line><polyline points="19 12 12 19 5 12"></polyline>
+    </g>
+    <g id="i-send" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
+    </g>
+    <g id="i-attach" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M21.4 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"></path>
+    </g>
+    <g id="i-smile" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <circle cx="12" cy="12" r="10"></circle><path d="M8 14s1.5 2 4 2 4-2 4-2"></path>
+      <line x1="9" y1="9" x2="9.01" y2="9"></line><line x1="15" y1="9" x2="15.01" y2="9"></line>
+    </g>
+    <g id="i-mic" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path>
+      <path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
+      <line x1="12" y1="19" x2="12" y2="23"></line><line x1="8" y1="23" x2="16" y2="23"></line>
+    </g>
+    <g id="i-phone" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3.1 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.1 4.2 2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.1 1 .3 1.9.7 2.8a2 2 0 0 1-.5 2.1L8.1 9.9a16 16 0 0 0 6 6l1.3-1.3a2 2 0 0 1 2.1-.4c.9.3 1.8.5 2.8.6a2 2 0 0 1 1.7 2z"></path>
+    </g>
+    <g id="i-video" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <polygon points="23 7 16 12 23 17 23 7"></polygon><rect x="1" y="5" width="15" height="14" rx="2" ry="2"></rect>
+    </g>
+    <g id="i-cam-off" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M16 16v2a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h2m4 0h5a2 2 0 0 1 2 2v3l4-3v10"></path>
+      <line x1="1" y1="1" x2="23" y2="23"></line>
+    </g>
+    <g id="i-mic-off" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <line x1="1" y1="1" x2="23" y2="23"></line>
+      <path d="M9 9v3a3 3 0 0 0 5.1 2.1M15 9.3V4a3 3 0 0 0-5.9-.8"></path>
+      <path d="M17 16.9A7 7 0 0 1 5 12v-2m14 0v2a7 7 0 0 1-.1 1.2"></path>
+      <line x1="12" y1="19" x2="12" y2="23"></line><line x1="8" y1="23" x2="16" y2="23"></line>
+    </g>
+    <g id="i-hangup" fill="currentColor"><path d="M19.6 7l-7.6 7.6-3.3-3.3-1.4 1.4 4.7 4.8 9-9L19.6 7zm-14.2 0L2 10.4l7 7 1.4-1.4-5.6-5.6.6-.6V7z"/></g>
+    <g id="i-bell" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"></path><path d="M13.7 21a2 2 0 0 1-3.4 0"></path>
+    </g>
+    <g id="i-bell-off" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M13.7 21a2 2 0 0 1-3.4 0"></path><path d="M18.6 13A17 17 0 0 1 18 8"></path>
+      <path d="M6.3 6.3A6 6 0 0 0 6 8c0 7-3 9-3 9h14"></path>
+      <path d="M18 8a6 6 0 0 0-9.3-5"></path><line x1="1" y1="1" x2="23" y2="23"></line>
+    </g>
+    <g id="i-pin" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <line x1="12" y1="17" x2="12" y2="22"></line>
+      <path d="M5 17h14l-1.6-2.6a2 2 0 0 1-.3-1V5a1 1 0 0 0-1-1H7.9a1 1 0 0 0-1 1v8.4a2 2 0 0 1-.3 1L5 17z"></path>
+    </g>
+    <g id="i-reply" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <polyline points="9 17 4 12 9 7"></polyline><path d="M20 18v-2a4 4 0 0 0-4-4H4"></path>
+    </g>
+    <g id="i-forward" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <polyline points="15 17 20 12 15 7"></polyline><path d="M4 18v-2a4 4 0 0 1 4-4h12"></path>
+    </g>
+    <g id="i-edit" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
+      <path d="M18.5 2.5a2.1 2.1 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
+    </g>
+    <g id="i-trash" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <polyline points="3 6 5 6 21 6"></polyline>
+      <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+    </g>
+    <g id="i-copy" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+      <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+    </g>
+    <g id="i-check" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+      <polyline points="20 6 9 17 4 12"></polyline>
+    </g>
+    <g id="i-shield" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path>
+    </g>
+    <g id="i-shield-check" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path><polyline points="9 12 11 14 15 10"></polyline>
+    </g>
+    <g id="i-lock" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
+    </g>
+    <g id="i-clock" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline>
+    </g>
+    <g id="i-users" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle>
+      <path d="M23 21v-2a4 4 0 0 0-3-3.9"></path><path d="M16 3.1a4 4 0 0 1 0 7.8"></path>
+    </g>
+    <g id="i-user-plus" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="8.5" cy="7" r="4"></circle>
+      <line x1="20" y1="8" x2="20" y2="14"></line><line x1="23" y1="11" x2="17" y2="11"></line>
+    </g>
+    <g id="i-logout" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path>
+      <polyline points="16 17 21 12 16 7"></polyline><line x1="21" y1="12" x2="9" y2="12"></line>
+    </g>
+    <g id="i-download" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+      <polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line>
+    </g>
+    <g id="i-file" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"></path><polyline points="13 2 13 9 20 9"></polyline>
+    </g>
+    <g id="i-image" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+      <circle cx="8.5" cy="8.5" r="1.5"></circle><polyline points="21 15 16 10 5 21"></polyline>
+    </g>
+    <g id="i-play" fill="currentColor"><path d="M8 5v14l11-7z"/></g>
+    <g id="i-pause" fill="currentColor"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></g>
+    <g id="i-palette" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <circle cx="13.5" cy="6.5" r=".5"></circle><circle cx="17.5" cy="10.5" r=".5"></circle>
+      <circle cx="8.5" cy="7.5" r=".5"></circle><circle cx="6.5" cy="12.5" r=".5"></circle>
+      <path d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10c.9 0 1.5-.7 1.5-1.5 0-.4-.2-.8-.4-1-.3-.3-.4-.6-.4-1 0-.9.7-1.5 1.5-1.5H16c3.3 0 6-2.7 6-6 0-4.9-4.5-9-10-9z"></path>
+    </g>
+    <!-- A large A beside a small A: the conventional "text size" glyph. -->
+    <g id="i-text-size" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M3 19 8 5l5 14"></path><path d="M4.6 15h6.8"></path>
+      <path d="M15.5 19 18.5 11l3 8"></path><path d="M16.4 17h4.2"></path>
+    </g>
+    <!-- Motion trails behind a moving dot. -->
+    <g id="i-motion" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <circle cx="17" cy="12" r="3.2"></circle>
+      <path d="M10 8H3"></path><path d="M9 12H5"></path><path d="M10 16H3"></path>
+    </g>
+    <g id="i-database" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <ellipse cx="12" cy="5" rx="9" ry="3"></ellipse>
+      <path d="M21 12c0 1.7-4 3-9 3s-9-1.3-9-3"></path><path d="M3 5v14c0 1.7 4 3 9 3s9-1.3 9-3V5"></path>
+    </g>
+    <g id="i-info" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line>
+    </g>
+    <g id="i-alert" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line>
+    </g>
+    <g id="i-key" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M21 2l-2 2m-7.6 7.6a5 5 0 1 1-7.1 7.1 5 5 0 0 1 7.1-7.1zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3"></path>
+    </g>
+    <g id="i-keyboard" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <rect x="2" y="6" width="20" height="12" rx="2"></rect>
+      <line x1="6" y1="10" x2="6" y2="10"></line><line x1="10" y1="10" x2="10" y2="10"></line>
+      <line x1="14" y1="10" x2="14" y2="10"></line><line x1="18" y1="10" x2="18" y2="10"></line>
+      <line x1="8" y1="14" x2="16" y2="14"></line>
+    </g>
+    <g id="i-more" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <circle cx="12" cy="12" r="1.6"></circle><circle cx="12" cy="5" r="1.6"></circle><circle cx="12" cy="19" r="1.6"></circle>
+    </g>
+    <g id="i-camera" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"></path>
+      <circle cx="12" cy="13" r="4"></circle>
+    </g>
+  </defs>
+</svg>
+
+<!-- ==========================================================================
+     AUTH
+     ======================================================================= -->
+<div class="auth" id="auth" hidden>
+  <div class="auth-card">
+    <div class="auth-brand">
+      <svg class="auth-logo" width="40" height="40" viewBox="0 0 24 24"><use href="#i-talon"/></svg>
+      <div class="auth-title">Talon</div>
+      <div class="auth-tagline" id="auth-tagline">Private messaging. Nothing leaves your devices readable.</div>
+    </div>
+
+    <div class="auth-alert hidden" id="auth-error" role="alert">
+      <svg width="16" height="16" viewBox="0 0 24 24"><use href="#i-alert"/></svg>
+      <span id="auth-error-text"></span>
+    </div>
+
+    <!-- Sign in -->
+    <form id="login-form" autocomplete="on">
+      <div class="field">
+        <label class="field-label" for="login-username">Username</label>
+        <input class="input" type="text" id="login-username" required autocomplete="username" autocapitalize="none" spellcheck="false">
+      </div>
+      <div class="field">
+        <label class="field-label" for="login-password">Password</label>
+        <input class="input" type="password" id="login-password" required autocomplete="current-password">
+      </div>
+      <label class="checkbox" style="margin-bottom:var(--sp-5)">
+        <input type="checkbox" id="login-remember" checked>
+        <span class="checkbox-box"></span>
+        <span class="field-hint">Keep me signed in on this device</span>
+      </label>
+      <button type="submit" class="btn btn-primary btn-lg btn-block" id="login-submit">Sign in</button>
+      <div class="auth-foot">No account yet? <button type="button" class="link-btn" id="go-register">Create one</button></div>
+    </form>
+
+    <!-- Register -->
+    <form id="register-form" class="hidden" autocomplete="on">
+      <div class="field">
+        <label class="field-label" for="register-username">Username</label>
+        <input class="input" type="text" id="register-username" required autocomplete="username" autocapitalize="none" spellcheck="false" placeholder="3–20 letters, numbers or _">
+      </div>
+      <div class="field">
+        <label class="field-label" for="register-password">Password</label>
+        <input class="input" type="password" id="register-password" required autocomplete="new-password">
+        <div class="pw-meter" id="pw-meter" data-score="0"><i></i><i></i><i></i><i></i></div>
+        <div class="field-hint" id="pw-hint">Your password derives your encryption key. It can never be reset or recovered.</div>
+      </div>
+      <div class="field">
+        <label class="field-label" for="register-password-confirm">Confirm password</label>
+        <input class="input" type="password" id="register-password-confirm" required autocomplete="new-password">
+      </div>
+      <label class="checkbox">
+        <input type="checkbox" id="register-vault" checked>
+        <span class="checkbox-box"></span>
+        <span class="field-hint">Encrypt everything stored on this device. Recommended. You will need your password each time you open Talon.</span>
+      </label>
+      <label class="checkbox" style="margin-bottom:var(--sp-5)">
+        <input type="checkbox" id="register-remember" disabled>
+        <span class="checkbox-box"></span>
+        <span class="field-hint">Keep me signed in on this device</span>
+      </label>
+      <button type="submit" class="btn btn-primary btn-lg btn-block" id="register-submit">Create account</button>
+      <div class="auth-foot">Already have an account? <button type="button" class="link-btn" id="go-login">Sign in</button></div>
+    </form>
+  </div>
+</div>
+
+<!-- ==========================================================================
+     APP SHELL
+     ======================================================================= -->
+<div class="app booting" id="app" hidden>
+
+  <!-- Desktop nav rail -->
+  <nav class="rail" aria-label="Sections">
+    <div class="rail-logo"><svg width="24" height="24" viewBox="0 0 24 24"><use href="#i-talon"/></svg></div>
+
+    <button class="rail-btn active" data-tab="chats" title="Chats" aria-label="Chats">
+      <svg width="21" height="21" viewBox="0 0 24 24"><use href="#i-chat"/></svg>
+      <span class="rail-badge hidden" id="rail-unread">0</span>
+    </button>
+    <button class="rail-btn" data-tab="profile" title="Profile" aria-label="Profile">
+      <svg width="21" height="21" viewBox="0 0 24 24"><use href="#i-user"/></svg>
+    </button>
+    <button class="rail-btn" data-tab="settings" title="Settings" aria-label="Settings">
+      <svg width="21" height="21" viewBox="0 0 24 24"><use href="#i-settings"/></svg>
+    </button>
+
+    <div class="rail-spacer"></div>
+
+    <button class="rail-btn" id="rail-shortcuts" title="Keyboard shortcuts (?)" aria-label="Keyboard shortcuts">
+      <svg width="20" height="20" viewBox="0 0 24 24"><use href="#i-keyboard"/></svg>
+    </button>
+    <button class="rail-btn" data-tab="profile" title="Your profile" aria-label="Your profile">
+      <div class="avatar rail-avatar" id="rail-avatar">··</div>
+    </button>
+  </nav>
+
+  <!-- ---------- CHATS PANE ---------- -->
+  <section class="pane" id="pane-chats">
+    <header class="pane-head">
+      <h1 class="pane-title">Chats</h1>
+      <div class="pane-actions">
+        <button class="icon-btn" id="btn-search" title="Search messages (Ctrl+K)" aria-label="Search messages">
+          <svg width="19" height="19" viewBox="0 0 24 24"><use href="#i-search"/></svg>
+        </button>
+        <button class="icon-btn" id="btn-new-group" title="New group" aria-label="New group">
+          <svg width="19" height="19" viewBox="0 0 24 24"><use href="#i-users"/></svg>
+        </button>
+        <button class="icon-btn" id="btn-add-contact" title="Add contact (Ctrl+N)" aria-label="Add contact">
+          <svg width="19" height="19" viewBox="0 0 24 24"><use href="#i-user-plus"/></svg>
+        </button>
+      </div>
+    </header>
+
+    <div class="search-wrap">
+      <svg class="search-icon" width="15" height="15" viewBox="0 0 24 24"><use href="#i-search"/></svg>
+      <input class="search-input" type="search" id="filter-input" placeholder="Filter chats" autocomplete="off" spellcheck="false">
+      <button class="icon-btn search-clear hidden" id="filter-clear" aria-label="Clear filter">
+        <svg width="14" height="14" viewBox="0 0 24 24"><use href="#i-close"/></svg>
+      </button>
+    </div>
+
+    <div class="pane-body scroll-y" id="chat-list-scroll">
+      <div class="chat-list" id="chat-list"></div>
+    </div>
+  </section>
+
+  <!-- ---------- PROFILE PANE ---------- -->
+  <section class="pane" id="pane-profile" hidden>
+    <header class="pane-head">
+      <h1 class="pane-title">Profile</h1>
+    </header>
+    <div class="pane-body scroll-y" id="profile-body"></div>
+  </section>
+
+  <!-- ---------- SETTINGS PANE ---------- -->
+  <section class="pane" id="pane-settings" hidden>
+    <header class="pane-head">
+      <h1 class="pane-title">Settings</h1>
+    </header>
+    <div class="pane-body scroll-y" id="settings-body"></div>
+  </section>
+
+  <!-- ---------- DETAIL COLUMN ---------- -->
+  <main class="detail" id="detail" aria-live="polite"></main>
+
+  <!-- Mobile tab bar -->
+  <nav class="tabbar" aria-label="Sections">
+    <button class="tabbar-btn active" data-tab="chats">
+      <svg width="21" height="21" viewBox="0 0 24 24"><use href="#i-chat"/></svg>
+      <span>Chats</span>
+      <span class="tabbar-badge hidden" id="tab-unread">0</span>
+    </button>
+    <button class="tabbar-btn" data-tab="profile">
+      <svg width="21" height="21" viewBox="0 0 24 24"><use href="#i-user"/></svg>
+      <span>Profile</span>
+    </button>
+    <button class="tabbar-btn" data-tab="settings">
+      <svg width="21" height="21" viewBox="0 0 24 24"><use href="#i-settings"/></svg>
+      <span>Settings</span>
+    </button>
+  </nav>
+</div>
+
+<!-- ==========================================================================
+     OVERLAYS
+     ======================================================================= -->
+
+<div class="toasts" id="toasts" role="status" aria-live="polite"></div>
+
+<div class="net-banner" id="net-banner">
+  <span class="net-dot"></span><span id="net-banner-text">Reconnecting…</span>
+</div>
+
+<!-- Generic modal host. app.js fills #modal-host with a .modal element. -->
+<div class="scrim" id="modal-host" hidden></div>
+
+<!-- Lightbox -->
+<div class="lightbox" id="lightbox" hidden>
+  <div class="lightbox-bar">
+    <button class="icon-btn" id="lightbox-download" title="Download" aria-label="Download">
+      <svg width="19" height="19" viewBox="0 0 24 24"><use href="#i-download"/></svg>
+    </button>
+    <button class="icon-btn" id="lightbox-close" title="Close" aria-label="Close">
+      <svg width="19" height="19" viewBox="0 0 24 24"><use href="#i-close"/></svg>
+    </button>
+  </div>
+  <img id="lightbox-img" alt="">
+  <div class="lightbox-cap" id="lightbox-cap"></div>
+</div>
+
+<!-- App lock -->
+<div class="lock" id="lock" hidden>
+  <svg class="lock-icon" width="34" height="34" viewBox="0 0 24 24"><use href="#i-lock"/></svg>
+  <div class="lock-title">Talon is locked</div>
+  <div class="lock-sub" id="lock-sub">Enter your PIN to continue</div>
+  <div class="pin-dots" id="pin-dots"><i class="pin-dot"></i><i class="pin-dot"></i><i class="pin-dot"></i><i class="pin-dot"></i></div>
+  <div class="pin-pad" id="pin-pad"></div>
+  <button class="link-btn" id="lock-signout">Sign out instead</button>
+</div>
+
+<!-- Incoming call -->
+<div class="call-ring" id="call-ring" hidden>
+  <div class="avatar avatar-xl call-avatar" id="ring-avatar">?</div>
+  <div class="call-name" id="ring-name">Incoming call</div>
+  <div class="call-sub">
+    <svg width="13" height="13" viewBox="0 0 24 24"><use href="#i-lock"/></svg>
+    <span id="ring-kind">Encrypted call</span>
+  </div>
+  <div class="call-actions">
+    <button class="call-key decline" id="ring-decline" aria-label="Decline">
+      <svg width="26" height="26" viewBox="0 0 24 24"><use href="#i-hangup"/></svg>
+    </button>
+    <button class="call-key accept" id="ring-accept" aria-label="Accept">
+      <svg width="26" height="26" viewBox="0 0 24 24"><use href="#i-phone"/></svg>
+    </button>
+  </div>
+</div>
+
+<!-- Active call -->
+<div class="call-live" id="call-live" hidden>
+  <video id="remote-video" autoplay playsinline></video>
+  <video id="local-video" autoplay playsinline muted></video>
+  <div class="call-live-head">
+    <div class="call-live-name" id="call-live-name">Connecting…</div>
+    <div class="call-live-timer" id="call-live-timer">00:00</div>
+  </div>
+  <div class="call-controls">
+    <button class="call-ctl" id="call-mic" title="Mute" aria-label="Mute">
+      <svg width="21" height="21" viewBox="0 0 24 24"><use href="#i-mic"/></svg>
+    </button>
+    <button class="call-ctl" id="call-cam" title="Camera" aria-label="Camera">
+      <svg width="21" height="21" viewBox="0 0 24 24"><use href="#i-video"/></svg>
+    </button>
+    <button class="call-ctl hangup" id="call-end" title="End call" aria-label="End call">
+      <svg width="21" height="21" viewBox="0 0 24 24"><use href="#i-hangup"/></svg>
+    </button>
+  </div>
+</div>
+
+<script type="module" src="js/app.js" integrity="sha384-ee3XEMvdOz5qws6K7a6ccFuKzhWmIlHMMN+xkvIeE5iBhAwVq6BCOiH7rBvcHMB/" crossorigin="anonymous"></script>
+</body>
+</html>

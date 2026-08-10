@@ -1,0 +1,19 @@
+{
+  "id": "/",
+  "short_name": "Talon",
+  "name": "Talon Private Messenger",
+  "description": "Zero-knowledge, end-to-end encrypted personal messenger designed to run over Tailscale",
+  "start_url": "/",
+  "scope": "/",
+  "background_color": "#1e1f23",
+  "theme_color": "#1e1f23",
+  "display": "standalone",
+  "display_override": ["standalone", "minimal-ui"],
+  "categories": ["social", "productivity"],
+  "icons": [
+    { "src": "icon-192.png", "type": "image/png", "sizes": "192x192", "purpose": "any" },
+    { "src": "icon-512.png", "type": "image/png", "sizes": "512x512", "purpose": "any" },
+    { "src": "icon-192.png", "type": "image/png", "sizes": "192x192", "purpose": "maskable" },
+    { "src": "icon-512.png", "type": "image/png", "sizes": "512x512", "purpose": "maskable" }
+  ]
+}

@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96" width="96" height="96" role="img" aria-label="Talon">
+  <rect width="96" height="96" rx="22" fill="#1e1f23"/>
+  <g fill="none" stroke="#f4eee2" stroke-width="5.4" stroke-linecap="round" stroke-linejoin="round"
+     transform="translate(48 48) scale(2.6) translate(-12 -12)">
+    <path d="M21.3 2.7 2.9 9.6a.55.55 0 0 0-.05 1l6.76 3.02 3.02 6.76a.55.55 0 0 0 1-.05Z"/>
+    <path d="M21.3 2.7 9.61 13.62"/>
+  </g>
+</svg>

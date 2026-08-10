@@ -1,0 +1,22 @@
+{
+  "bundle": {
+    "path": "public/js/app.js",
+    "sha256": "4170e72ab7da25ef5b8470bcba6fc155e68764c364088c329a9aaf437aec2174",
+    "bytes": 266299
+  },
+  "sources": {
+    "dir": "web/src",
+    "count": 17,
+    "sha256": "f888c898ce0f089bea2a0b2296409d329567b866289c901b524edb152ab908d9"
+  },
+  "builtWith": {
+    "esbuild": "0.25.12",
+    "options": {
+      "bundle": true,
+      "minify": true,
+      "format": "esm",
+      "target": "es2020",
+      "sourcemap": false
+    }
+  }
+}

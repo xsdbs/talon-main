@@ -1,0 +1,16 @@
+{
+  "name": "e2e-messenger-server",
+  "version": "1.0.0",
+  "description": "Minimal relay and static file server for Tailscale E2E chat",
+  "main": "server.js",
+  "type": "module",
+  "scripts": {
+    "start": "node server.js",
+    "test": "node --test \"test/**/*.test.js\""
+  },
+  "dependencies": {
+    "@peculiar/x509": "^1.14.3",
+    "web-push": "^3.6.7",
+    "ws": "^8.18.0"
+  }
+}
