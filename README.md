@@ -383,9 +383,6 @@ must never leave the machine.
 
 ## Documentation
 
-`docs/talon-reference.md` is the engineering reference: architecture, the
-protocol in depth, every invariant, and the full mutation-testing results.
-
 A fuller documentation site lives in `site/docs/`, generated from
 `site/tools/docs-content.mjs`. It walks the send and receive paths line by
 line with excerpts from the real source, and the generator **verifies every
