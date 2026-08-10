@@ -1,6 +1,3 @@
-<div align="center">
-
-<img src="docs/images/logo.svg" width="88" height="88" alt="">
 
 # Talon
 
