@@ -53,6 +53,16 @@ export const DEFAULT_SETTINGS = {
   sendReadReceipts: true,
   sendTypingIndicators: true,
   sharePresence: true,      // tell contacts when you are online, peer to peer
+
+  // Constant-rate cover traffic. ON by default, unlike most privacy switches
+  // here, because the thing it defends against (an observer counting your
+  // envelopes and reading the timing) is defeated only if the rate is
+  // constant, and a feature nobody switches on defends nobody. It costs data
+  // and battery, and the Settings row says so in those words.
+  //
+  // Safe to default on for existing accounts: it changes only how often this
+  // client sends, never how anything is stored or read.
+  coverTraffic: true,
   autoDownloadImages: true,
   clockFormat: 'auto',      // auto | 12 | 24
   spellcheck: true,
@@ -302,6 +312,13 @@ export const State = {
   preKeys: null,
   outbox: [],
   outboxTimer: null,
+
+  // Constant-rate cover traffic. In memory only and deliberately so: these
+  // describe this run of this tab, and persisting them would mean a reload
+  // inherits a schedule from a session that is no longer sending.
+  coverTimer: null,
+  lastSentAt: 0,        // last outbound send of ANY kind, real or cover
+  lastCoverTarget: null,
 
   activeContactId: null,
   activeTab: 'chats',
