@@ -1,6 +1,6 @@
 // Bump this on every app-shell change, or installed clients keep serving the
 // stale cached shell forever (stale-while-revalidate returns cache first).
-const CACHE_NAME = 'talon-cache-v23';
+const CACHE_NAME = 'talon-cache-v25';
 
 // Every fetch this worker makes to refill the cache uses `cache: 'reload'`,
 // which skips the browser's own HTTP cache and forces a real network trip.
