@@ -19,6 +19,7 @@ import {
   makeEntry, addEntry, removeEntry, findEntry, dueEntries, isExhausted,
   afterAttempt, forceDue, nextWakeup, alreadyReceived, ACK_TIMEOUT_MS
 } from './outbox.js';
+import { planCover, keyOf, coverPayload, isCover } from './cover.js';
 import { playCue } from './sound.js';
 import {
   toast, confirmDialog, openModal, closeModal, isModalOpen, closePopover,
@@ -468,6 +469,10 @@ function connectWebSocket() {
     // Anything stranded by the outage goes out now rather than waiting for its
     // backoff to elapse. Coming back online is the event we were waiting for.
     flushOutbox();
+    // Started here rather than at boot: cover traffic needs a socket, and
+    // starting it before one exists means the first interval is spent
+    // discovering that.
+    scheduleCover(Date.now());
 
     if (State.reconnectInterval) { clearInterval(State.reconnectInterval); State.reconnectInterval = null; }
     if (State.pingInterval) clearInterval(State.pingInterval);
@@ -626,6 +631,110 @@ function startPresenceHeartbeat() {
   State.presenceTimer = setInterval(() => {
     if (document.visibilityState === 'visible') broadcastPresence('online');
   }, PRESENCE_HEARTBEAT_MS);
+}
+
+/**
+ * Raises a notification for a message that arrived on a LIVE socket while the
+ * page was hidden.
+ *
+ * The relay no longer pushes for live deliveries, so without this a
+ * backgrounded tab with an open socket would go silent: the message arrives,
+ * gets stored, and nothing tells the user. Holding a socket is not the same as
+ * being at the screen.
+ *
+ * This is strictly better than the push it replaces. A push carries only an
+ * opaque tag, because the relay cannot read the message; here the message is
+ * already decrypted, so the notification can say who it is from. Nothing extra
+ * reaches the relay, since it is drawn entirely locally.
+ */
+function notifyLiveMessage(contact, payloadObj) {
+  if (document.visibilityState === 'visible') return;
+  if (!('Notification' in window) || Notification.permission !== 'granted') return;
+  if (!('serviceWorker' in navigator)) return;
+  // A muted conversation stays muted whichever path the message took. The
+  // service worker applies the same rule to pushes, reading the tag list from
+  // IndexedDB; here the contact is in hand, so it can be read directly.
+  if (contact && contact.muted) return;
+
+  const name = (contact && (contact.nickname || contact.name)) || 'New message';
+  const body = State.settings.showPreviews === false
+    ? 'New message'
+    : previewTextFor(payloadObj);
+
+  navigator.serviceWorker.ready
+    .then((reg) => reg.showNotification(name, {
+      body,
+      icon: '/icon-192.png',
+      // Collapses repeats from one conversation instead of stacking a
+      // notification per message, the same way the worker does for pushes.
+      tag: `talon-${contact ? contact.idPub : 'unknown'}`,
+      renotify: true
+    }))
+    .catch(() => { /* no worker, no notification, nothing to recover */ });
+}
+
+function previewTextFor(p) {
+  if (!p || typeof p !== 'object') return 'New message';
+  switch (p.type) {
+    case 'text': return String(p.text || '').slice(0, 120);
+    case 'file': return 'Sent a file';
+    case 'voice-memo': return 'Sent a voice message';
+    case 'sticker': return 'Sent a sticker';
+    default: return 'New message';
+  }
+}
+
+/* --------------------------------------------------- cover traffic (v3) */
+//
+// The timers, the socket and the State reads. The decisions all live in
+// cover.js, which is pure and tested against an injected clock. Same split as
+// the outbox: anything with a timer in it cannot be tested properly, so it
+// gets as little logic as possible.
+
+/**
+ * Contacts we could plausibly send cover to right now.
+ *
+ * "Online" here is what the peer told us over the encrypted presence channel,
+ * NOT something the relay was asked. Sending cover to a peer who is not
+ * connected would have the relay write it to the offline queue, where at a
+ * fixed rate it accumulates forever.
+ */
+function coverTargets() {
+  if (!State.currentUser || !State.contacts) return [];
+  return State.contacts
+    .filter((c) => c.online && !c.blocked && !c.pending
+      && State.sessions && State.sessions[c.idPub])
+    .map((c) => ({ contactId: c.idPub }));
+}
+
+function scheduleCover(at) {
+  if (State.coverTimer) clearTimeout(State.coverTimer);
+  const wait = Math.max(1000, at - Date.now());
+  State.coverTimer = setTimeout(runCover, wait);
+}
+
+async function runCover() {
+  State.coverTimer = null;
+  const plan = planCover({
+    now: Date.now(),
+    lastSentAt: State.lastSentAt || 0,
+    onlineTargets: coverTargets(),
+    lastTarget: State.lastCoverTarget || null,
+    foreground: document.visibilityState === 'visible',
+    enabled: State.settings.coverTraffic !== false && !!State.socketConnected
+  });
+
+  if (plan.send) {
+    // notify is false and must stay false. Waking someone's phone for cover
+    // traffic would make this feature actively worse than not having it.
+    //
+    // `State.lastSentAt` is not updated here: transmit() in messaging.js does
+    // it for every outbound frame, real or cover, which is what makes a real
+    // message replace a cover cell rather than add to one.
+    await sendE2EPayload(plan.send.contactId, coverPayload(), undefined, false);
+    State.lastCoverTarget = keyOf(plan.send);
+  }
+  scheduleCover(plan.nextCheckAt);
 }
 
 /* ====================================================== INBOUND DISPATCH */
@@ -938,6 +1047,13 @@ function handleIncoming(senderId, decResult, batched = false) {
   if (!decResult) return;
   const { payloadObj, envelopeIndex, remoteId } = decResult;
 
+  // Cover traffic. Dropped here rather than earlier, so the ratchet has
+  // already advanced by the time we discard it: a cover cell is a real
+  // envelope in a real chain and skipping it would put the session out of
+  // step. Nothing is stored, rendered, counted as unread, or sounded, which
+  // is the entire behaviour a cover cell is allowed to have.
+  if (isCover(payloadObj)) return;
+
   // An envelope from our OWN identity key is another of our devices telling us
   // what it sent. It must be handled before anything below, because the
   // unknown-sender path would otherwise add us to our own contact list as a
@@ -1211,6 +1327,14 @@ function storeInbound(convId, fromId, payload, envelopeIndex, batched, remoteId)
   if (!batched) persist.messages();
 
   if (!batched) playCue('receive');
+
+  // The relay no longer pushes for a message it delivered live, so a hidden
+  // tab holding an open socket has to raise its own notification or the
+  // message arrives in silence. Skipped for a batched drain, which is a
+  // reconnect replaying the queue rather than something arriving now.
+  if (!batched && msg.sender === 'them') {
+    notifyLiveMessage(State.contacts.find((c) => c.idPub === fromId), payload);
+  }
 
   const open = State.activeContactId === convId;
   if (open && !batched) {
