@@ -526,6 +526,9 @@ export function renderSettingsPane() {
               </div>
             </div>` : ''}
             ${rowToggle('privacyBlur', 'Blur when unfocused', 'Hide message content when you switch away', 'shield')}
+            ${rowToggle('coverTraffic', 'Constant-rate traffic',
+              'Sends a same-sized encrypted cell on a fixed schedule whether or not you are chatting, so nobody watching the network can tell when you are. Costs about 7 MB a day in normal use, or 29 MB if you leave the app open all day, and some battery. Defends against an observer on the network, not against the relay.',
+              'shield')}
             <div class="row">
               <div class="row-icon">${icon('key', 17)}</div>
               <div class="row-main">
