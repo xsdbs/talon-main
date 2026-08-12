@@ -416,7 +416,7 @@ export const Db = {
   // is exactly why the signed prekey carries an Ed25519 signature the fetcher
   // verifies.
 
-  publishPreKeys(keyId, { signPub, signedPreKey, kemPreKey, oneTimePreKeys }) {
+  publishPreKeys(keyId, { signPub, signedPreKey, kemPreKey, caps, capsSig, oneTimePreKeys }) {
     if (!keyId) return false;
     if (!db.preKeys) db.preKeys = {};
     const existing = db.preKeys[keyId] || { oneTimePreKeys: [] };
@@ -427,6 +427,12 @@ export const Db = {
       // Post-quantum prekey. Public material, signed by the owner: the relay
       // stores and hands it out but cannot substitute one of its own.
       kemPreKey: kemPreKey || existing.kemPreKey,
+      // Which protocol versions the owner speaks, and their signature over
+      // that list. Stored and handed back verbatim. The relay does not read
+      // them, and cannot usefully edit them: the client verifies capsSig
+      // under the same signing key it already checks the prekeys with.
+      caps: caps || existing.caps,
+      capsSig: capsSig || existing.capsSig,
       // Replenishment appends; ids are allocated by the client.
       oneTimePreKeys: [
         ...(existing.oneTimePreKeys || []),
@@ -457,6 +463,12 @@ export const Db = {
       signPub: entry.signPub,
       signedPreKey: entry.signedPreKey,
       kemPreKey: entry.kemPreKey || null,
+      // Undefined rather than null when absent, so the shape is identical to
+      // what an un-upgraded client published. The receiving client treats a
+      // missing list as "speaks v2 only", and a null would be a third state
+      // that means the same thing and has to be handled separately.
+      caps: entry.caps || undefined,
+      capsSig: entry.capsSig || undefined,
       oneTimePreKey
     };
   },
