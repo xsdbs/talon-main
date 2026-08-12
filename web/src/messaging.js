@@ -15,7 +15,9 @@ import {
 } from './crypto-bundle.js';
 import {
   initiateSession, acceptSession, encryptWithSession, decryptWithSession,
-  verifyBundle, buildSignedPreKeyMessage, buildKemPreKeyMessage
+  encryptWithSessionV3, decryptWithSessionV3,
+  verifyBundle, buildSignedPreKeyMessage, buildKemPreKeyMessage,
+  buildCapsMessage, PROTOCOL_CAPS
 } from './ratchet.js';
 import { State, persist, metaFor, Storage } from './store.js';
 import { writeMutedTags } from './pushdb.js';
@@ -155,6 +157,11 @@ function deriveSigningKey(idPrivHex) {
   return signingKeypairFromSeed(sha256Hash(utf8Encode('TalonSigningKey:' + idPrivHex)));
 }
 
+// Bumped whenever PROTOCOL_CAPS changes, so every client re-publishes its
+// capability list once and exactly once. A boolean would not do it: the next
+// capability added would find it already true and never publish again.
+const CAPS_REVISION = 1;
+
 /** Creates or rotates local prekey material and publishes the public halves. */
 export async function ensurePreKeys({ force = false } = {}) {
   if (!State.currentUser) return;
@@ -209,9 +216,19 @@ export async function ensurePreKeys({ force = false } = {}) {
     }
   }
 
+  // AN UPGRADED ACCOUNT PUBLISHES NOTHING OTHERWISE. An existing user already
+  // has a signed prekey, a KEM prekey and a full one-time pool, so all three
+  // flags below are false on the first boot after the upgrade and the early
+  // return fires. The capability list would then never reach the relay, no
+  // peer would ever see `v3`, and every session would keep negotiating v2
+  // while both ends were perfectly capable of v3. Silent, and it would have
+  // looked like the negotiation code simply did not work.
+  const capsPublished = pk.capsPublished === CAPS_REVISION;
+  pk.capsPublished = CAPS_REVISION;
+
   persist.preKeys();
 
-  if (!publishSpk && !publishKem && fresh.length === 0) return;
+  if (!publishSpk && !publishKem && capsPublished && fresh.length === 0) return;
 
   try {
     await postJSON('/api/publish-prekeys', {
@@ -225,6 +242,16 @@ export async function ensurePreKeys({ force = false } = {}) {
       signPub: pk.signPub,
       signedPreKey: { pub: pk.spk.pub, sig: pk.spk.sig },
       kemPreKey: { pub: pk.kem.pub, sig: pk.kem.sig },
+      // Which protocol versions we speak, so a peer knows whether to open a
+      // v3 session or fall back to v2. Signed under the same key as the
+      // prekeys: an unsigned list would let the relay choose our protocol
+      // version by editing it, which is the whole downgrade attack.
+      //
+      // New plaintext on an API body, and a deliberate one. It is a version
+      // string, not identity-derived, and it tells the relay only what the
+      // shape of our envelopes already would.
+      caps: PROTOCOL_CAPS,
+      capsSig: bytesToHex(signBytes(signing.privateKey, buildCapsMessage(PROTOCOL_CAPS))),
       oneTimePreKeys: fresh
     });
   } catch (err) {
@@ -393,7 +420,7 @@ export async function syncToMyDevices(convId, payloadObj, localId) {
 
   // Everything except this device. Sending to ourselves would echo the
   // message straight back and store it twice.
-  const others = targets.filter((t) => t.session && t.session.v === 2 && t.deviceId && t.deviceId !== mine);
+  const others = targets.filter((t) => t.session && isModern(t.session) && t.deviceId && t.deviceId !== mine);
   if (!others.length) return { sent: 0 };
 
   const envelope = {
@@ -474,6 +501,18 @@ export async function revokeDevice(deviceId) {
   } catch (err) {
     return { ok: false, reason: err.message };
   }
+}
+
+/**
+ * A session on the X3DH + Double Ratchet path, whichever version of it.
+ *
+ * v2 and v3 differ only in whether the ratchet header travels encrypted, so
+ * every call site that used to ask "is this v2" means "is this not v1". Spelt
+ * out once here rather than as `=== 2 || === 3` in eight places, because the
+ * next version would have to find all eight again.
+ */
+function isModern(session) {
+  return !!session && (session.v === 2 || session.v === 3);
 }
 
 /** Resolvers handed to acceptSession() so it can find our private halves. */
@@ -593,7 +632,7 @@ async function fetchBundles(peerId) {
  */
 async function ensureSendSession(contactId) {
   const current = State.sessions[contactId];
-  if (current && current.v === 2) return current;
+  if (current && isModern(current)) return current;
   if (sessionSetup.has(contactId)) return sessionSetup.get(contactId);
 
   const job = (async () => {
@@ -651,7 +690,7 @@ async function ensureSendSessions(contactId) {
   for (const { deviceId, bundle } of bundles) {
     const key = sessionKey(contactId, deviceId);
     const current = State.sessions[key];
-    if (current && current.v === 2) {
+    if (current && isModern(current)) {
       out.push({ deviceId, session: current });
       continue;
     }
@@ -675,7 +714,7 @@ export async function sendE2EPayload(contactId, payloadObj, convId, notify = fal
   if (!State.currentUser) return { success: false, messageIndex: -1 };
 
   const targets = await ensureSendSessions(contactId);
-  const v2Targets = targets.filter((t) => t.session && t.session.v === 2);
+  const v2Targets = targets.filter((t) => t.session && isModern(t.session));
 
   if (v2Targets.length) {
     // One envelope per device. Each has its own ratchet, so each gets its own
@@ -715,6 +754,14 @@ function transmit(frame) {
   if (!(State.socketConnected && State.socket && State.socket.readyState === WebSocket.OPEN)) {
     return false;
   }
+
+  // Every outbound frame passes through here, which is why the cover-traffic
+  // clock is reset here rather than at the send sites. A real message must
+  // REPLACE the cover cell that would otherwise have gone out, not arrive on
+  // top of it, or the observable rate rises while you type and the constant
+  // rate stops being constant. Setting it at each call site instead would mean
+  // the next one added quietly reintroduces that.
+  State.lastSentAt = Date.now();
   const out = frame.type === 'send' && State.currentUser
     ? { ...frame, payload: { sealed: 1, ...sealSender(frame.recipientId, {
         senderId: State.currentUser.idPub,
@@ -784,7 +831,13 @@ function sendV2(contactId, session, payloadObj, convId, notify, deviceId = null)
   const mid = session.seq || 0;
   session.seq = mid + 1;
 
-  const { header, nonce, ciphertext } = encryptWithSession(session, { ...payloadObj, _mid: mid });
+  // v3 puts { dh, pn, n } inside an AEAD; v2 sends them in the clear. Both
+  // shapes are produced here so a session opened before the upgrade keeps
+  // working without a migration, and so mail already queued for a v2 peer
+  // still drains.
+  const payload = session.v === 3
+    ? encryptWithSessionV3(session, { ...payloadObj, _mid: mid })
+    : { v: 2, ...encryptWithSession(session, { ...payloadObj, _mid: mid }) };
   persist.sessions();
 
   const ref = newRef();
@@ -796,7 +849,7 @@ function sendV2(contactId, session, payloadObj, convId, notify, deviceId = null)
     // before devices existed. See the note in server.js: this is deliberate
     // new plaintext, and the relay learns which device a message is for.
     recipientDev: deviceId || undefined,
-    payload: { v: 2, header, nonce, ciphertext },
+    payload,
     // The conversation the RECIPIENT sees: the group id for a group, our
     // own identity key for a one-to-one chat. Hashed with the recipient, so
     // no two members of a group send the same tag.
@@ -903,7 +956,7 @@ function pruneSkipped(session) {
  * this account before the upgrade) still drain.
  */
 export function processIncomingMessage(senderId, payload, senderDev = null) {
-  if (payload && payload.v === 2) return processV2(senderId, payload, senderDev);
+  if (payload && (payload.v === 2 || payload.v === 3)) return processV2(senderId, payload, senderDev);
   return processV1(senderId, payload);
 }
 
@@ -924,7 +977,7 @@ export function sessionInfo(contactId) {
   if (!s) return { established: false };
   return {
     established: true,
-    version: s.v === 2 ? 2 : 1,
+    version: isModern(s) ? s.v : 1,
     // Recorded at handshake time: a peer without a KEM prekey still gets a
     // working session, just a classical one.
     postQuantum: !!s.pq
@@ -957,8 +1010,13 @@ export function resetSession(contactId) {
 }
 
 function processV2(senderId, payload, senderDev = null) {
-  const { header, nonce, ciphertext } = payload;
-  if (!header || typeof nonce !== 'string' || typeof ciphertext !== 'string') return null;
+  const isV3 = payload.v === 3;
+  // v3 keeps { dh, pn, n } inside `eh`. The only thing readable before a key
+  // exists is `hs`, the X3DH preamble, and only until the peer replies.
+  const header = isV3 ? payload.hs : payload.header;
+  const { nonce, ciphertext } = payload;
+  if (typeof nonce !== 'string' || typeof ciphertext !== 'string') return null;
+  if (isV3 ? typeof payload.eh !== 'string' : !header) return null;
 
   // One ratchet per SENDING device. Two devices of the same peer each run
   // their own X3DH against us, and keying both under the bare peer id meant
@@ -970,24 +1028,43 @@ function processV2(senderId, payload, senderDev = null) {
   const skey = sessionKey(senderId, senderDev);
   let session = State.sessions[skey];
 
+  const wantVersion = isV3 ? 3 : 2;
+
+  // NO MID-SESSION DOWNGRADE. Once a session is v3 the peer is known to speak
+  // v3, so a v2-shaped envelope arriving under the same key is either a relay
+  // replaying something old or a relay trying to talk us back down to a
+  // readable header. Neither deserves an answer, and the reverse direction is
+  // refused for the same reason.
+  if (session && session.v !== wantVersion && session.theirRatchetPub != null) return null;
+
   // An X3DH preamble means the peer is opening (or re-opening) a session.
   // The preamble is replayed until they hear back from us, so only act on it
-  // when we do not already hold a matching v2 session.
-  const needsAccept = header.ek && header.spk &&
-    (!session || session.v !== 2 || session.theirRatchetPub == null);
+  // when we do not already hold a matching session.
+  const needsAccept = header && header.ek && header.spk &&
+    (!session || session.v !== wantVersion || session.theirRatchetPub == null);
 
   if (needsAccept) {
     const accepted = acceptSession(State.currentUser.idPriv, senderId, header, preKeyResolver());
-    if (accepted) {
+    if (accepted && accepted.v === wantVersion) {
       accepted.seq = session && session.seq ? session.seq : 0;
       session = accepted;
       State.sessions[skey] = session;
     }
   }
 
-  if (!session || session.v !== 2) return null;
+  if (!session || session.v !== wantVersion) return null;
 
-  const payloadObj = decryptWithSession(session, header, nonce, ciphertext);
+  let payloadObj;
+  let openedHeader = header;
+  if (isV3) {
+    const r = decryptWithSessionV3(session, payload.eh, nonce, ciphertext);
+    payloadObj = r ? r.payload : null;
+    // `n` only becomes readable once the header is open, and the fallback
+    // envelope index below still needs it.
+    if (r) openedHeader = r.header;
+  } else {
+    payloadObj = decryptWithSession(session, header, nonce, ciphertext);
+  }
   persist.sessions();
   if (!payloadObj) {
     decryptFailures.set(senderId, (decryptFailures.get(senderId) || 0) + 1);
@@ -996,7 +1073,9 @@ function processV2(senderId, payload, senderDev = null) {
   decryptFailures.delete(senderId);
 
   // `_mid` is the sender's stable counter; strip it before the app sees it.
-  const envelopeIndex = Number.isSafeInteger(payloadObj._mid) ? payloadObj._mid : header.n;
+  const envelopeIndex = Number.isSafeInteger(payloadObj._mid)
+    ? payloadObj._mid
+    : (openedHeader ? openedHeader.n : 0);
   delete payloadObj._mid;
 
   // `_lid` is the sender's own id for this message, minted once and reused on
@@ -1014,7 +1093,7 @@ function processV1(senderId, payload) {
   const { ephemPub, messageIndex, nonce, ciphertext } = payload;
 
   // A v1 envelope can never resurrect a v2 session.
-  if (session && session.v === 2) return null;
+  if (session && isModern(session)) return null;
 
   // Reject a malformed or hostile envelope before touching any key material.
   if (!Number.isSafeInteger(messageIndex) || messageIndex < 0) return null;
