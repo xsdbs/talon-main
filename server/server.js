@@ -741,7 +741,7 @@ function handleRequest(req, res) {
         // Publish this account's public prekey material. Everything stored is
         // public; the signature is what stops this relay substituting keys.
         if (req.url === '/api/publish-prekeys') {
-          const { username, authHash, signPub, signedPreKey, kemPreKey, oneTimePreKeys, deviceKey } = payload;
+          const { username, authHash, signPub, signedPreKey, kemPreKey, caps, capsSig, oneTimePreKeys, deviceKey } = payload;
           const user = Db.getUser(username);
           if (!verifyAuth(user, authHash, req)) {
             res.writeHead(401, { 'Content-Type': 'application/json' });
@@ -755,7 +755,24 @@ function handleRequest(req, res) {
           const keyId = (typeof deviceKey === 'string' && /^[0-9a-f]{64}$/i.test(deviceKey))
             ? deviceKey
             : user.idPub;
-          Db.publishPreKeys(keyId, { signPub, signedPreKey, kemPreKey, oneTimePreKeys });
+          // `caps` is bounded before storage. It is attacker-controlled input
+          // that ends up in a record handed to every peer who asks, and an
+          // unbounded array keyed by an authenticated user is still a way to
+          // grow the database without limit. Short strings, few of them.
+          const safeCaps = Array.isArray(caps)
+            ? caps.filter((c) => typeof c === 'string' && c.length <= 16).slice(0, 8)
+            : undefined;
+          const safeCapsSig = (typeof capsSig === 'string' && /^[0-9a-f]{128}$/i.test(capsSig))
+            ? capsSig : undefined;
+
+          Db.publishPreKeys(keyId, {
+            signPub, signedPreKey, kemPreKey, oneTimePreKeys,
+            // Both or neither. A list without its signature is one the client
+            // will refuse anyway, and storing it would only make the refusal
+            // happen later and look like a different bug.
+            caps: safeCapsSig ? safeCaps : undefined,
+            capsSig: safeCaps ? safeCapsSig : undefined
+          });
           // The pool size is read into a local before the log line rather than
           // called inside it. The identity is only an argument here and never
           // printed, but the redaction check in test/redact.test.js reads the
@@ -1343,6 +1360,7 @@ wss.on('connection', (ws, req) => {
               .filter((s) => s && s.readyState === 1)
             : socketsFor(recipientId);
 
+          let queued = false;
           if (openSockets.length > 0) {
             const frame = JSON.stringify(routedMessage);
             for (const sock of openSockets) sock.send(frame);
@@ -1376,6 +1394,7 @@ wss.on('connection', (ws, req) => {
                 Db.addOfflineMessage(queuedSender, recipientId, payload, t);
               }
             }
+            queued = true;
             ws.send(ackFor('queued'));
             log('WS', Redact.redacting
               ? `Queued offline message (${isSealed ? 'sealed' : 'addressed'}, recipient unreachable)`
@@ -1404,7 +1423,21 @@ wss.on('connection', (ws, req) => {
           // The cost is a push that occasionally travels and is then
           // discarded on arrival, which is a little more traffic in exchange
           // for the relay knowing nothing.
-          if (notify) {
+          //
+          // AND ONLY WHEN THE MESSAGE WAS QUEUED. A recipient with an open
+          // socket already has the envelope; the page raises its own
+          // notification if it is hidden, which it can do because it can
+          // actually read the message. Pushing on the live path told the
+          // push service nothing useful and cost a wakeup per message.
+          //
+          // It also closes the last thing that separated real traffic from
+          // cover traffic on the wire. Cover cells only ever go to peers that
+          // are online, so with pushes fired only on the queued path there is
+          // no `notify` for the relay to correlate against them. Sending a
+          // push for a live delivery would have made `notify: true` mean
+          // "this one is real", and constant-rate traffic would have been
+          // decoration.
+          if (notify && queued) {
             Push.notify(recipientId, { t: tag })
               .catch(err => logError('PUSH', 'notify error:', err));
           }
