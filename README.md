@@ -79,7 +79,7 @@ worse than one that is honest about its limits.
 Requires **Node 20 or newer**. Nothing else.
 
 ```bash
-git clone https://github.com/xsdbs/talon-main.git talon
+git clone https://github.com/xsdbs/talon-main.git 
 cd talon
 
 cd server && npm install
