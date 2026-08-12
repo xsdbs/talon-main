@@ -1,13 +1,13 @@
 {
   "bundle": {
     "path": "public/js/app.js",
-    "sha256": "4170e72ab7da25ef5b8470bcba6fc155e68764c364088c329a9aaf437aec2174",
-    "bytes": 266299
+    "sha256": "7bbc3d7810d502d8980908925fd1a7f8728a6c82cdf3f69c52f3bb6343d7f9ee",
+    "bytes": 272685
   },
   "sources": {
     "dir": "web/src",
-    "count": 17,
-    "sha256": "f888c898ce0f089bea2a0b2296409d329567b866289c901b524edb152ab908d9"
+    "count": 18,
+    "sha256": "ef4640470bbd09a403e0bc1fce508961c0ff7d2df35b0e659cf6d470f722e3ab"
   },
   "builtWith": {
     "esbuild": "0.25.12",
